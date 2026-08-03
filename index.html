@@ -9,7 +9,9 @@
     /* 페이지 전체 기본 설정 */
     body {
       margin: 0;
-      height: 100vh;
+      min-height: 100vh;
+      padding: 40px 16px;
+      box-sizing: border-box;
 
       /* 내용을 화면 정중앙에 배치 */
       display: flex;
@@ -49,6 +51,128 @@
       font-size: 16px;
       color: #888888;
     }
+
+    /* 방명록 영역 */
+    .guestbook {
+      width: 100%;
+      max-width: 520px;
+      margin-top: 48px;
+      text-align: left;
+    }
+
+    .guestbook h2 {
+      font-size: 24px;
+      margin: 0 0 16px;
+      text-align: center;
+    }
+
+    .guestbook-form {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background-color: #ffffff;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .guestbook-form input,
+    .guestbook-form textarea {
+      font-family: inherit;
+      font-size: 16px;
+      color: #222222;
+      padding: 10px;
+      border: 1px solid #d0d0d0;
+      border-radius: 6px;
+      box-sizing: border-box;
+      width: 100%;
+    }
+
+    .guestbook-form textarea {
+      resize: vertical;
+      min-height: 90px;
+    }
+
+    .guestbook-form button {
+      font-family: inherit;
+      font-size: 16px;
+      padding: 10px 16px;
+      border: none;
+      border-radius: 6px;
+      background-color: #222222;
+      color: #ffffff;
+      cursor: pointer;
+    }
+
+    .guestbook-form button:disabled {
+      background-color: #999999;
+      cursor: not-allowed;
+    }
+
+    /* 상태 / 오류 표시 */
+    .status {
+      margin: 12px 0 0;
+      font-size: 15px;
+      color: #666666;
+      text-align: center;
+    }
+
+    .error {
+      margin: 12px 0 0;
+      font-size: 15px;
+      color: #c0392b;
+      text-align: center;
+      white-space: pre-wrap;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    /* 메시지 목록 */
+    .message-list {
+      list-style: none;
+      margin: 20px 0 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .message-item {
+      background-color: #ffffff;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 12px 14px;
+    }
+
+    .message-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+      margin-bottom: 6px;
+    }
+
+    .message-name {
+      font-size: 16px;
+      font-weight: bold;
+      word-break: break-all;
+    }
+
+    .message-time {
+      font-size: 13px;
+      color: #888888;
+      white-space: nowrap;
+    }
+
+    .message-content {
+      font-size: 16px;
+      color: #333333;
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
   </style>
 </head>
 <body>
@@ -60,6 +184,174 @@
   <p class="description">GitHub Push를 통한 자동 배포에 성공했습니다.</p>
 
   <p class="version">Version 2</p>
+
+  <section class="guestbook">
+    <h2>방명록</h2>
+
+    <form class="guestbook-form" id="guestbook-form">
+      <input
+        type="text"
+        id="name-input"
+        maxlength="30"
+        placeholder="이름 (최대 30자)"
+        autocomplete="off"
+        required
+      >
+      <textarea
+        id="content-input"
+        maxlength="300"
+        placeholder="메시지 (최대 300자)"
+        required
+      ></textarea>
+      <button type="submit" id="submit-button">등록</button>
+    </form>
+
+    <p class="status hidden" id="status"></p>
+    <p class="error hidden" id="error"></p>
+
+    <ul class="message-list" id="message-list"></ul>
+  </section>
+
+  <!-- Supabase JavaScript SDK v2 (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <script>
+    // ===== 여기 두 값만 본인 프로젝트 값으로 수정하세요 =====
+    const SUPABASE_URL = "https://YOUR-PROJECT-REF.supabase.co";
+    const SUPABASE_PUBLISHABLE_KEY = "YOUR_PUBLISHABLE_KEY";
+    // =====================================================
+
+    const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+
+    const formEl = document.getElementById("guestbook-form");
+    const nameEl = document.getElementById("name-input");
+    const contentEl = document.getElementById("content-input");
+    const buttonEl = document.getElementById("submit-button");
+    const statusEl = document.getElementById("status");
+    const errorEl = document.getElementById("error");
+    const listEl = document.getElementById("message-list");
+
+    /* 상태 문구 표시 (빈 문자열이면 숨김) */
+    function showStatus(text) {
+      statusEl.textContent = text;
+      statusEl.classList.toggle("hidden", !text);
+    }
+
+    /* 오류 문구 표시 (빈 문자열이면 숨김) */
+    function showError(text) {
+      errorEl.textContent = text;
+      errorEl.classList.toggle("hidden", !text);
+    }
+
+    /* created_at을 사용자의 지역 시간으로 변환 */
+    function formatLocalTime(value) {
+      if (!value) return "";
+      const date = new Date(value);
+      if (isNaN(date.getTime())) return "";
+      return date.toLocaleString();
+    }
+
+    /* 메시지 한 건을 DOM으로 생성 (사용자 입력은 textContent로만 삽입) */
+    function createMessageItem(message) {
+      const item = document.createElement("li");
+      item.className = "message-item";
+
+      const head = document.createElement("div");
+      head.className = "message-head";
+
+      const name = document.createElement("span");
+      name.className = "message-name";
+      name.textContent = message.name;
+
+      const time = document.createElement("time");
+      time.className = "message-time";
+      time.textContent = formatLocalTime(message.created_at);
+      if (message.created_at) time.dateTime = message.created_at;
+
+      head.appendChild(name);
+      head.appendChild(time);
+
+      const content = document.createElement("p");
+      content.className = "message-content";
+      content.textContent = message.content;
+
+      item.appendChild(head);
+      item.appendChild(content);
+      return item;
+    }
+
+    /* 목록 조회 후 최신 작성 순으로 렌더링 */
+    async function loadMessages() {
+      showError("");
+      showStatus("불러오는 중...");
+
+      const { data, error } = await client
+        .from("messages")
+        .select("id, name, content, created_at")
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        showStatus("");
+        showError("목록을 불러오지 못했습니다: " + error.message);
+        return;
+      }
+
+      listEl.textContent = "";
+      const messages = data || [];
+
+      if (messages.length === 0) {
+        showStatus("아직 등록된 메시지가 없습니다.");
+        return;
+      }
+
+      const fragment = document.createDocumentFragment();
+      messages.forEach(function (message) {
+        fragment.appendChild(createMessageItem(message));
+      });
+      listEl.appendChild(fragment);
+
+      showStatus("");
+    }
+
+    /* 등록 처리 */
+    formEl.addEventListener("submit", async function (event) {
+      event.preventDefault();
+
+      const name = nameEl.value.trim();
+      const content = contentEl.value.trim();
+
+      showError("");
+
+      if (!name || !content) {
+        showError("이름과 메시지를 모두 입력해 주세요.");
+        return;
+      }
+
+      buttonEl.disabled = true;
+      showStatus("등록 중...");
+
+      const { error } = await client
+        .from("messages")
+        .insert({ name: name, content: content });
+
+      if (error) {
+        showStatus("");
+        showError("등록에 실패했습니다: " + error.message);
+        buttonEl.disabled = false;
+        return;
+      }
+
+      // 저장 성공 후 입력창 비우고 목록 재조회
+      nameEl.value = "";
+      contentEl.value = "";
+      buttonEl.disabled = false;
+
+      await loadMessages();
+    });
+
+    // 페이지를 열면 목록 조회
+    loadMessages();
+  </script>
 
 </body>
 </html>
